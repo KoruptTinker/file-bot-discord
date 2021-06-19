@@ -1,9 +1,9 @@
 require("dotenv").config();
-const {Client, Message, MessageFlags, MessageEmbed, User} = require("discord.js");
+const {Client, Message, MessageFlags, MessageEmbed, User, MessageAttachment} = require("discord.js");
 const {google}= require('googleapis');
 const readline = require('readline');
 const fs = require('fs');
-const { resolve } = require("path");
+const request= require('request');
 
 const client= new Client();
 client.login(process.env.BOT_TOKEN);
@@ -25,7 +25,7 @@ const img=0x1F5BC;
 const video=0xF39E;
 const doc=0x1F4D1;
 
-const SCOPES = ['https://www.googleapis.com/auth/drive.metadata.readonly'];
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const TOKEN_PATH = './secrets/token.json';
 
 
@@ -39,20 +39,22 @@ function getAccessToken(oAuth2Client, callback) {
         input: process.stdin,
         output: process.stdout,
     });
-  rl.question('Enter the code from that page here: ', (code) => {
-    rl.close();
-    oAuth2Client.getToken(code, (err, token) => {
-      if (err) return console.error('Error retrieving access token', err);
-      oAuth2Client.setCredentials(token);
+    rl.question('Enter the code from that page here: ', (code) => {
+        rl.close();
+        oAuth2Client.getToken(code, (err, token) => {
+        if (err){
+            return console.error('Error retrieving access token', err);
+        }
+        oAuth2Client.setCredentials(token);
 
 
-      fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
-        if (err) return console.error(err);
-        console.log('Token stored to', TOKEN_PATH);
-      });
-      callback(oAuth2Client);
+        fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
+            if (err) return console.error(err);
+            console.log('Token stored to', TOKEN_PATH);
+        });
+        callback(oAuth2Client);
+        });
     });
-  });
 }
 
 
@@ -92,7 +94,7 @@ function getDirectory(current){
     drive.files.list({
         q: `'${current}' in parents`,
         pageSize: 10,
-        fields: 'nextPageToken, files(id, name, ownedByMe, mimeType)',
+        fields: 'nextPageToken, files(id, name, ownedByMe, mimeType, webViewLink, webContentLink, size)',
     }, (err, res) => {
         if (err){
             return console.log('The API returned an error: ' + err);
@@ -186,7 +188,7 @@ function reverseDirectory(current){
     drive.files.list({
         q: `'${current}' in parents`,
         pageSize: 10,
-        fields: 'nextPageToken, files(id, name, ownedByMe, mimeType)',
+        fields: 'nextPageToken, files(id, name, ownedByMe, mimeType ,webViewLink, webContentLink, size)',
     }, (err, res) => {
         if (err){
             return console.log('The API returned an error: ' + err);
@@ -207,10 +209,119 @@ function reverseDirectory(current){
 }
 
 
+function resolveShareLink(fileName,files){
+    var file;
+    var shareLink;
+    for(var i=0;i<files.length;i++){
+        if(fileName==files[i].name){
+            file=files[i];
+            break;
+        }
+    }
+    if(file){
+        drive.permissions.create({
+            fileId: `${file.id}`,
+            requestBody:{
+                role: 'reader',
+                type: 'anyone'
+            }
+        }).then(
+            (res)=>{
+                if(file.webContentLink){
+                    shareLink=file.webContentLink;
+                }
+                else{
+                    shareLink=file.webViewLink;
+                }
+                client.channels.resolve(fileChannel).send(shareLink);
+            },
+            (reason)=>{
+                console.error(reason);
+            }
+        );
+    }
+    else{
+        client.channels.resolve(fileChannel).send("File not found. Kindly check the name of the file and retry.");
+    }
+}
+
+
+function downloadFile(fileName,files){
+    var file;
+    for(var i=0;i<files.length;i++){
+        if(fileName==files[i].name){
+            file=files[i];
+            break;
+        }
+    }
+    if(file){
+        if(file.size<8388608){
+            var dest = fs.createWriteStream(`./temp/${file.name}`);
+            var stream=drive.files.get(
+                {
+                    fileId: `${file.id}`, 
+                    alt: 'media'
+                },  
+                {
+                    responseType: 'stream'
+                },
+                function(err, res){
+                    res.data
+                    .on('end', () => {})
+                    .on('error', err => {
+                        console.log('Error', err);
+                    })
+                    .pipe(dest).on('finish', ()=>{
+                        client.channels.resolve(fileChannel).send("Download completed");
+                        var read=fs.createReadStream(`./temp/${file.name}`);
+                        var uploadMessage= new MessageAttachment(read);
+                        client.channels.resolve(fileChannel).send("File you requested: ", uploadMessage);
+                        fs.unlink(`./temp/${file.name}`,()=>{});
+                    });
+                }
+            );
+        }
+        else{
+            client.channels.resolve(fileChannel).send("File size too large. Sending the direct download link instead");
+            resolveShareLink(file.name,files);
+        }
+    }
+    else{
+        client.channels.resolve(fileChannel).send("File not found. Kindly check the name of the file and retry.");
+    }
+}
+
+
+function uploadFile(messageAttachment, fileName, current){
+    var destination=fs.createWriteStream(`./temp/${fileName}`);
+    var metaData={
+        'name': `${fileName}`,
+        "parents":`['${current}']`
+    };
+    request.get(messageAttachment.attachment).pipe(destination)
+        .on('finish', ()=>{
+            var media={
+                body: fs.createReadStream(`./temp/${fileName}`)
+            };
+            drive.files.create({
+                resource: metaData,
+                media: media
+            },(err,res)=>{
+                if(err){
+                    console.log(err);
+                }
+                client.channels.resolve(fileChannel).send("File uploaded successfully");
+                fs.unlink(`./temp/${fileName}`, ()=>{});
+            });
+        });
+}
+
+
 client.on('ready', () => {
     console.log("Logged in");
     client.user.setActivity("Testing", {type: 'WATCHING'}).then((presence) => {},
     (reason) =>{
+        console.log("Error");
         console.error(reason);
     });
     fs.readFile('./secrets/credentials.json', (err, content) => {
@@ -244,16 +355,25 @@ client.on('message', (message) => {
                     }
                 }
                 else if(args[0].toLowerCase()=='s'){
-                    //share file code
+                    resolveShareLink(args[1],files);
+                }
+                else if(args[0].toLowerCase()=='d'){
+                    downloadFile(args[1],files);
+                }
+                else if(args[0].toLowerCase()=='u'){
+                    message.attachments.forEach(
+                        (attachment)=>{
+                            uploadFile(attachment,args[1],currentID);
+                        }
+                    )
                 }
                 else{
-                    message.author.send("Wrong command. C")
+                    message.author.send("Wrong command. Kindly check your command and try again.\nYou can also seek help using '.help' command.");
                 }
             }
             else{
                 getDirectory(rootID);
             }
-            //code for upload
         }
     }
 });
