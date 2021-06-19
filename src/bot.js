@@ -3,7 +3,6 @@ const {Client, Message, MessageFlags, MessageEmbed, User} = require("discord.js"
 const {google}= require('googleapis');
 const readline = require('readline');
 const fs = require('fs');
-const {FileStack}=require('../utilities/FileStack');
 const { resolve } = require("path");
 
 const client= new Client();
@@ -13,9 +12,9 @@ var rootID="";
 var currentID;
 var directory;
 
-var parentStack=new FileStack();
-
-const admin_discord=process.env.ADMIN_ID;
+var parentStack=[];
+const adminDiscord=process.env.ADMIN_ID;
+const fileChannel=process.env.FILE_CHANNEL;
 
 var oAuth2Client;
 var drive;
@@ -28,6 +27,7 @@ const doc=0x1F4D1;
 
 const SCOPES = ['https://www.googleapis.com/auth/drive.metadata.readonly'];
 const TOKEN_PATH = './secrets/token.json';
+
 
 function getAccessToken(oAuth2Client, callback) {
     const authUrl = oAuth2Client.generateAuthUrl({
@@ -87,9 +87,10 @@ function getRootID(auth) {
     );
 }
 
-function getDirectory(currentID){
+
+function getDirectory(current){
     drive.files.list({
-        q: `'${currentID}' in parents`,
+        q: `'${current}' in parents`,
         pageSize: 10,
         fields: 'nextPageToken, files(id, name, ownedByMe, mimeType)',
     }, (err, res) => {
@@ -98,7 +99,6 @@ function getDirectory(currentID){
         }
         directory = res.data.files;
         if (directory.length) {
-            console.log(directory.length);
             directory=directory.filter(
                 (file)=> {
                     return file.ownedByMe;
@@ -109,8 +109,13 @@ function getDirectory(currentID){
         else {
             console.log('No files found.');
         }
+        currentID=current;
+        if(currentID!=rootID){
+            parentStack.push(currentID);    
+        }
     });
 }
+
 
 function prepareMessage(files){
     var description="```Directory: ";
@@ -132,8 +137,9 @@ function prepareMessage(files){
             description+=file.name;
         });
     description+="```";
-    client.channels.resolve('853504695686397972').send(description);
+    client.channels.resolve(fileChannel).send(description);
 }
+
 
 function getCommands(content){
 
@@ -146,22 +152,60 @@ function getCommands(content){
     return[command,args];
 }
 
+
 function resolveID(fileName,files){
-    var currentID;
-    console.log(files);
+    var current;
     for(var i=0; i<files.length;i++){
         if(fileName==files[i].name && files[i].mimeType.substring(files[i].mimeType.length-6)=="folder"){
-            currentID=files[i].id;
+            current=files[i].id;
         }
     }
-    if(!currentID){
-        client.users.resolve(admin_discord).send("Kindly check the name of the file you have entered!");
+    if(!current){
+        client.users.resolve(adminDiscord).send("Kindly check the name of the file you have entered!");
         return;
     }
     else{
-        getDirectory(currentID);
+        getDirectory(current);
     }
 }
+
+
+function reverseTraverse(){
+    parentStack.pop();
+    if(parentStack.length==0){
+        currentID=rootID;
+        parentStack.push(rootID);
+    }
+    else{
+        currentID=parentStack[parentStack.length-1];
+    }
+    reverseDirectory(currentID);
+}
+
+function reverseDirectory(current){
+    drive.files.list({
+        q: `'${current}' in parents`,
+        pageSize: 10,
+        fields: 'nextPageToken, files(id, name, ownedByMe, mimeType)',
+    }, (err, res) => {
+        if (err){
+            return console.log('The API returned an error: ' + err);
+        }
+        directory = res.data.files;
+        if (directory.length) {
+            directory=directory.filter(
+                (file)=> {
+                    return file.ownedByMe;
+                });
+            files=directory;
+            prepareMessage(directory);
+        } 
+        else {
+            console.log('No files found.');
+        }
+    });
+}
+
 
 client.on('ready', () => {
     console.log("Logged in");
@@ -177,6 +221,7 @@ client.on('ready', () => {
     });
 });
 
+
 client.on('message', (message) => {
 
     if(message.author.bot){
@@ -189,9 +234,14 @@ client.on('message', (message) => {
         const args=userInput[1];
         delete userInput;
         if(command=="files"){
-            if(args.length){
+            if(args.length>1){
                 if(args[0].toLowerCase()=='o'){
-                    resolveID(args[1], files);
+                    if(args[1]==".."){
+                        reverseTraverse();
+                    }
+                    else{
+                        resolveID(args[1], files);
+                    }
                 }
                 else if(args[0].toLowerCase()=='s'){
                     //share file code
