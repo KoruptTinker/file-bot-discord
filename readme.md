@@ -18,7 +18,7 @@ cd file-bot-discord
 npm install
 ```
 
-3) Get your drive API credentials from Google Cloud Platform. Refer to this [URL] (https://developers.google.com/drive/api/v3/enable-drive-api) for help.
+3) Get your drive API credentials from Google Cloud Platform. Refer to this [URL](https://developers.google.com/drive/api/v3/enable-drive-api) for help.
 
 4) Run the following command to properly get the ".env" file ready for use and follow on screen steps.
 
