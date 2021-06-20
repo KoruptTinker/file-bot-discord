@@ -3,9 +3,6 @@ const fs=require('fs');
 const readline= require('readline');
 
 
-
-
-
 function generateEnv1(){
     var configInterface=readline.createInterface({
         input: process.stdin,
@@ -62,6 +59,8 @@ function generateEnv4(){
     configInterface.question('Enter the ID of the text channel for messages: ', fileChannel=>{
         fs.appendFile("./.env",`FILE_CHANNEL=${fileChannel}`,()=>{
             configInterface.close();
+            console.log("Properly configured. Go ahead and run the bot.");
+            process.exit();
         });
     });
 
