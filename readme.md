@@ -20,13 +20,15 @@ npm install
 
 3) Get your drive API credentials from Google Cloud Platform. Refer to this [URL](https://developers.google.com/drive/api/v3/enable-drive-api) for help.
 
-4) Run the following command to properly get the ".env" file ready for use and follow on screen steps.
+4) Place the 'credentials.json' in "secrets" folder. Create one if it doesn't exist in the project directory itself.
+
+5) Run the following command to properly get the ".env" file ready for use and follow on screen steps.
 
 ```bash 
 npm run configuration
 ```
 
-5) Once done start up the bot using the following command 
+6) Once done start up the bot using the following command 
 
 ```bash 
 npm run start
